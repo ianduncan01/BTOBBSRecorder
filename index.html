@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>BTO BBS Field Recorder — ST4364</title>
+  <!-- Tailwind CSS for responsive, high-contrast outdoor mobile styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet.js CSS & JS for reliable interactive mapping -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Google Fonts: Inter for crisp legibility in daylight -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #f1f5f9;
+      color: #0f172a;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
+    }
+
+    /* Hide scrollbars on horizontal section scroller while preserving touch scroll */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Tactile press feedback for thumb buttons */
+    .tap-btn {
+      transition: transform 0.08s ease, background-color 0.12s ease, border-color 0.12s ease;
+      user-select: none;
+    }
+    .tap-btn:active {
+      transform: scale(0.94);
+    }
+
+    /* Subtle pulse animation when incrementing count */
+    @keyframes countPop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.16); }
+      100% { transform: scale(1); }
+    }
+    .pop-anim {
+      animation: countPop 0.2s ease-out;
+    }
+
+    /* Leaflet custom labels & pulsing GPS user marker */
+    .sec-num-badge {
+      background: #0f172a;
+      color: #ffffff;
+      border: 2px solid #ffffff;
+      border-radius: 9999px;
+      font-weight: 800;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .sec-num-badge.active-sec {
+      background: #f59e0b;
+      color: #0f172a;
+      border-color: #0f172a;
+      transform: scale(1.18);
+    }
+    .gps-pulse-dot {
+      width: 18px;
+      height: 18px;
+      background: #2563eb;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.35);
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-24 select-none">
+
+  <!-- Toast / Non-blocking Notification Banner -->
+  <div id="toast-banner" class="fixed top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-opacity duration-200">
+    <div id="toast-text" class="bg-slate-900 text-white text-sm font-semibold px-4 py-2.5 rounded-full shadow-lg border border-slate-700 whitespace-nowrap">
+      Saved
+    </div>
+  </div>
+
+  <!-- Confirmation Modal (Replaces window.confirm) -->
+  <div id="confirm-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200">
+      <h3 id="modal-title" class="text-lg font-bold text-slate-900">Confirm Action</h3>
+      <p id="modal-desc" class="text-sm text-slate-600 mt-1.5">Are you sure you want to proceed?</p>
+      <div class="mt-5 flex gap-3 justify-end">
+        <button id="modal-cancel" class="px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Cancel</button>
+        <button id="modal-confirm" class="px-4 py-2.5 rounded-xl text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Custom Species Modal -->
+  <div id="add-species-modal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200">
+      <h3 class="text-lg font-bold text-slate-900">Add Species to List</h3>
+      <p class="text-xs text-slate-500 mt-0.5">Added species are automatically pinned to the top.</p>
+      <div class="mt-4 space-y-3">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Species Name</label>
+          <input id="custom-sp-name" type="text" placeholder="e.g. Cuckoo or Yellowhammer" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">BTO 2-Letter Code</label>
+          <input id="custom-sp-code" type="text" maxlength="3" placeholder="e.g. CK or Y." class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-slate-900 font-bold uppercase focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+        </div>
+      </div>
+      <div class="mt-5 flex gap-3 justify-end">
+        <button id="close-add-sp" class="px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700">Cancel</button>
+        <button id="save-add-sp" class="px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-700 text-white shadow-sm">Add & Pin</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP HEADER: Square, Visit Type, Collapsible Survey Details & Timers -->
+  <header class="bg-white border-b border-slate-300 shadow-xs">
+    <div class="max-w-2xl mx-auto px-3 pt-2.5 pb-2">
+      <!-- Primary Compact Row -->
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <div class="bg-emerald-800 text-white font-extrabold text-xs px-2 py-1 rounded-lg tracking-wide">BTO BBS</div>
+          <input id="grid-square-input" type="text" value="ST4364" maxlength="8" aria-label="1km Grid Square"
+            class="w-24 font-extrabold text-lg text-slate-900 bg-slate-100 border border-slate-300 rounded-lg px-2 py-0.5 uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-emerald-600" />
+        </div>
+
+        <!-- Early / Late Visit Toggle -->
+        <div class="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-300">
+          <button id="btn-visit-early" onclick="setVisitType('Early')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-colors">Early</button>
+          <button id="btn-visit-late" onclick="setVisitType('Late')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-colors">Late</button>
+        </div>
+
+        <!-- Expand/Collapse Survey Setup Drawer -->
+        <button id="toggle-setup-btn" onclick="toggleSetupDrawer()" class="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 px-2.5 py-1.5 rounded-xl text-xs font-bold">
+          <span>Times & Weather</span>
+          <svg id="setup-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+      </div>
+
+      <!-- Collapsible Metadata Drawer (Date, Transect Timers, Weather 1/2/3) -->
+      <div id="setup-drawer" class="hidden mt-3 pt-3 border-t border-slate-200 space-y-3">
+        <!-- Date & Live Total Birds Counter -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Visit Date</label>
+            <input id="visit-date-input" type="date" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-slate-900" />
+          </div>
+          <div class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 flex flex-col justify-center">
+            <span class="text-[11px] font-bold uppercase text-slate-500">Total Birds Logged</span>
+            <span id="header-total-birds" class="text-base font-extrabold text-emerald-800">0 birds</span>
+          </div>
+        </div>
+
+        <!-- Transect 1 & Transect 2 Start/End Timers -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <!-- Transect 1 (Secs 1-5) -->
+          <div class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-2.5">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-extrabold text-emerald-900">Transect 1 (Sec 1–5)</span>
+              <span id="t1-duration" class="text-[11px] font-bold text-emerald-700">-- min</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button onclick="stampTime('t1Start')" class="flex-1 bg-white border border-emerald-300 rounded-lg py-1.5 px-2 text-xs font-bold text-slate-800 active:bg-emerald-100">
+                Start: <span id="t1-start-disp" class="text-emerald-800">--:--</span>
+              </button>
+              <button onclick="stampTime('t1End')" class="flex-1 bg-white border border-emerald-300 rounded-lg py-1.5 px-2 text-xs font-bold text-slate-800 active:bg-emerald-100">
+                End: <span id="t1-end-disp" class="text-emerald-800">--:--</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Transect 2 (Secs 6-10) -->
+          <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-2.5">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-extrabold text-blue-900">Transect 2 (Sec 6–10)</span>
+              <span id="t2-duration" class="text-[11px] font-bold text-blue-700">-- min</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button onclick="stampTime('t2Start')" class="flex-1 bg-white border border-blue-300 rounded-lg py-1.5 px-2 text-xs font-bold text-slate-800 active:bg-blue-100">
+                Start: <span id="t2-start-disp" class="text-blue-800">--:--</span>
+              </button>
+              <button onclick="stampTime('t2End')" class="flex-1 bg-white border border-blue-300 rounded-lg py-1.5 px-2 text-xs font-bold text-slate-800 active:bg-blue-100">
+                End: <span id="t2-end-disp" class="text-blue-800">--:--</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- BTO Weather Codes (1, 2, 3) -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-extrabold text-slate-700">Weather Codes (1 = Good/Low, 3 = Heavy/Poor)</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <span class="block text-[11px] font-bold text-slate-600 mb-1">Cloud (1-3)</span>
+              <div class="grid grid-cols-3 gap-1" id="weather-cloud"></div>
+            </div>
+            <div>
+              <span class="block text-[11px] font-bold text-slate-600 mb-1">Rain (1-3)</span>
+              <div class="grid grid-cols-3 gap-1" id="weather-rain"></div>
+            </div>
+            <div>
+              <span class="block text-[11px] font-bold text-slate-600 mb-1">Wind (1-3)</span>
+              <div class="grid grid-cols-3 gap-1" id="weather-wind"></div>
+            </div>
+            <div>
+              <span class="block text-[11px] font-bold text-slate-600 mb-1">Visibility (1-3)</span>
+              <div class="grid grid-cols-3 gap-1" id="weather-vis"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- STICKY SECTION SELECTOR BAR (Visible on Birds and Transect Map Tabs) -->
+  <div id="sticky-section-bar" class="sticky top-0 z-30 bg-slate-900 text-white shadow-md border-b border-slate-700">
+    <div class="max-w-2xl mx-auto px-3 py-2">
+      <!-- Transect Status + Next Section Quick Action -->
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="flex items-center gap-2">
+          <span id="transect-badge" class="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-600 text-white">
+            Transect 1 (200m)
+          </span>
+          <span class="text-sm font-bold text-slate-100">
+            Sec <span id="active-sec-label">1</span>
+            <span class="text-slate-400 font-normal text-xs ml-1">(<span id="active-sec-count">0</span> birds)</span>
+          </span>
+        </div>
+
+        <button id="next-section-btn" onclick="goNextSection()" class="tap-btn bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-3.5 py-1.5 rounded-xl shadow-sm flex items-center gap-1">
+          <span id="next-sec-btn-label">Next Sec 2</span>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+
+      <!-- Horizontal 1–10 Section Pills with Visual Divider between 5 and 6 -->
+      <div id="section-pills-container" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+        <!-- Rendered dynamically by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN CONTENT AREA -->
+  <main class="max-w-2xl mx-auto px-3 pt-3">
+
+    <!-- TAB 1: BIRDS FIELD RECORDER -->
+    <section id="view-birds" class="space-y-3">
+      <!-- Search, Filter & Add Species Bar -->
+      <div class="bg-white rounded-2xl p-2.5 border border-slate-300 shadow-xs space-y-2">
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <input id="species-search" type="text" placeholder="Filter species or BTO code (e.g. WR, Robin)..."
+              class="w-full bg-slate-100 border border-slate-300 rounded-xl pl-8 pr-8 py-2 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white" />
+            <svg class="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <button id="clear-search-btn" onclick="clearSearch()" class="hidden absolute right-2 top-2 text-slate-400 hover:text-slate-700 p-0.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <button onclick="openAddSpeciesModal()" class="tap-btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-3 py-2.5 rounded-xl whitespace-nowrap shadow-xs">
+            + Species
+          </button>
+        </div>
+
+        <!-- Filter Pills: All vs Active in Visit vs Active in Section -->
+        <div class="flex items-center justify-between gap-1.5 text-xs">
+          <div class="flex items-center gap-1">
+            <button onclick="setSpeciesFilter('all')" id="filter-all" class="px-2.5 py-1 rounded-lg font-bold transition-colors">All (38)</button>
+            <button onclick="setSpeciesFilter('recorded')" id="filter-recorded" class="px-2.5 py-1 rounded-lg font-bold transition-colors">Seen Today</button>
+            <button onclick="setSpeciesFilter('section')" id="filter-section" class="px-2.5 py-1 rounded-lg font-bold transition-colors">This Sec</button>
+          </div>
+          <span class="text-[11px] font-semibold text-slate-500 hidden sm:inline">Tap band to +1</span>
+        </div>
+      </div>
+
+      <!-- Distance Band Legend Strip -->
+      <div class="grid grid-cols-4 gap-1.5 px-1 text-center text-[11px] font-extrabold uppercase tracking-tight text-slate-600">
+        <div class="bg-emerald-100/80 text-emerald-900 rounded-lg py-1 border border-emerald-200">1: 0–25m</div>
+        <div class="bg-sky-100/80 text-sky-900 rounded-lg py-1 border border-sky-200">2: 25–100m</div>
+        <div class="bg-indigo-100/80 text-indigo-900 rounded-lg py-1 border border-indigo-200">3: &gt;100m</div>
+        <div class="bg-amber-100/80 text-amber-900 rounded-lg py-1 border border-amber-200">F: In Flight</div>
+      </div>
+
+      <!-- Species Cards List -->
+      <div id="species-list-container" class="space-y-2.5">
+        <!-- Rendered dynamically by JS -->
+      </div>
+    </section>
+
+    <!-- TAB 2: INTERACTIVE TRANSECT MAP & LIVE GPS -->
+    <section id="view-map" class="hidden space-y-3">
+      <!-- Live GPS & Nearest Section Status Banner -->
+      <div class="bg-white rounded-2xl p-3 border border-slate-300 shadow-xs space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="flex items-center gap-2">
+              <span id="map-square-title" class="text-sm font-extrabold text-slate-900">ST4364 Transect Map</span>
+              <span id="gps-status-pill" class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
+                GPS Idle
+              </span>
+            </div>
+            <p id="gps-nearest-readout" class="text-xs text-slate-500 mt-0.5">
+              Tap <strong>Locate Me</strong> outdoors or <strong>Simulate Walk</strong> indoors to test section detection.
+            </p>
+          </div>
+
+          <!-- Primary GPS & Simulation Buttons -->
+          <div class="flex items-center gap-1.5">
+            <button id="btn-toggle-gps" onclick="toggleGpsTracking()" class="tap-btn bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded-xl shadow-xs flex items-center gap-1.5">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              <span id="btn-gps-label">Locate Me</span>
+            </button>
+            <button id="btn-sim-walk" onclick="toggleSimulateWalk()" class="tap-btn bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-2 rounded-xl shadow-xs">
+              <span id="btn-sim-label">Simulate Walk</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Auto-Switch Banner when GPS detects a different 200m section -->
+        <div id="section-switch-alert" class="hidden bg-amber-100 border-2 border-amber-400 rounded-xl p-2.5 flex items-center justify-between gap-2">
+          <div class="text-xs font-bold text-amber-950">
+            You entered <span id="detected-sec-name" class="font-black underline">Section 2</span> (<span id="detected-sec-dist">12m</span> from line)
+          </div>
+          <button id="btn-accept-detected-sec" onclick="acceptDetectedSection()" class="tap-btn bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs px-3 py-1.5 rounded-lg shadow-xs shrink-0">
+            Switch to Sec <span id="detected-sec-num">2</span>
+          </button>
+        </div>
+
+        <!-- Quick Controls Strip: Auto-Advance Toggle, Edit Route Toggle, Open in Google Maps -->
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200 text-xs">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer select-none">
+            <input id="auto-advance-sec-chk" type="checkbox" onchange="toggleAutoAdvanceSec(this.checked)" class="w-4 h-4 rounded accent-emerald-700" />
+            <span class="font-bold text-slate-700">Auto-switch section on boundary</span>
+          </label>
+
+          <div class="flex items-center gap-1.5">
+            <button id="btn-edit-route" onclick="toggleRouteEditMode()" class="tap-btn px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 font-bold text-slate-800">
+              Edit Route
+            </button>
+            <a id="google-maps-external-link" href="https://www.google.com/maps/search/?api=1&query=51.375,-2.815" target="_blank" rel="noopener noreferrer"
+              class="tap-btn px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 font-bold text-emerald-900 flex items-center gap-1">
+              <span>Google Maps</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Leaflet Map Container -->
+      <div class="bg-white rounded-2xl p-1.5 border border-slate-300 shadow-xs relative">
+        <div id="bbs-leaflet-map" class="w-full h-[54vh] min-h-[340px] rounded-xl z-10"></div>
+
+        <!-- Map Legend Overlay -->
+        <div class="mt-2 px-2 pb-1 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-600">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex items-center gap-1"><span class="w-3 h-1.5 rounded bg-emerald-600 inline-block"></span> T1 (Sec 1–5)</span>
+            <span class="inline-flex items-center gap-1"><span class="w-3 h-1.5 rounded bg-blue-600 inline-block"></span> T2 (Sec 6–10)</span>
+            <span class="inline-flex items-center gap-1"><span class="w-3 h-1.5 rounded bg-amber-500 inline-block"></span> Active Sec</span>
+          </div>
+          <span id="route-lengths-readout" class="text-slate-500">T1: 1000m · T2: 1000m</span>
+        </div>
+      </div>
+
+      <!-- Route Setup / Waypoint Editor Drawer (Shown when 'Edit Route' is active) -->
+      <div id="route-editor-panel" class="hidden bg-white rounded-2xl p-4 border-2 border-amber-400 shadow-xs space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-extrabold text-slate-900">Route Setup & Custom Footpath Waypoints</h3>
+            <p class="text-xs text-slate-600 mt-0.5">
+              Drag the <strong>Start/End pins</strong> directly on the map above (auto-divided into five 200 m sections), or paste/import your exact ST4364 footpath coordinates.
+            </p>
+          </div>
+          <button onclick="resetDefaultTransects()" class="tap-btn shrink-0 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1.5 rounded-lg">
+            Reset Default
+          </button>
+        </div>
+
+        <!-- GPX File Import -->
+        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-extrabold text-slate-800">Import GPX Route File</div>
+            <div class="text-[11px] text-slate-500">Splits a 2 km GPX track/route evenly across Sections 1–10.</div>
+          </div>
+          <label class="tap-btn cursor-pointer bg-slate-900 text-white text-xs font-bold px-3 py-2 rounded-xl">
+            <span>Choose .GPX</span>
+            <input id="gpx-file-input" type="file" accept=".gpx,application/gpx+xml,text/xml" onchange="handleGpxUpload(event)" class="hidden" />
+          </label>
+        </div>
+
+        <!-- Manual Coordinate Input for T1 & T2 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div class="bg-emerald-50/60 border border-emerald-200 rounded-xl p-2.5 space-y-2">
+            <div class="font-extrabold text-emerald-900">Transect 1 (Sections 1–5)</div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">Start (Lat, Lng)</label>
+              <input id="t1-start-coord" type="text" placeholder="51.3707, -2.8186" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">End (Lat, Lng)</label>
+              <input id="t1-end-coord" type="text" placeholder="51.3793, -2.8186" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs" />
+            </div>
+          </div>
+
+          <div class="bg-blue-50/60 border border-blue-200 rounded-xl p-2.5 space-y-2">
+            <div class="font-extrabold text-blue-900">Transect 2 (Sections 6–10)</div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">Start (Lat, Lng)</label>
+              <input id="t2-start-coord" type="text" placeholder="51.3793, -2.8114" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">End (Lat, Lng)</label>
+              <input id="t2-end-coord" type="text" placeholder="51.3707, -2.8114" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs" />
+            </div>
+          </div>
+        </div>
+
+        <button onclick="applyManualCoordinates()" class="tap-btn w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs py-2.5 rounded-xl shadow-xs">
+          Apply Coordinates & Rebuild 200m Sections
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB 3: MAMMALS & COLONIES -->
+    <section id="view-mammals" class="hidden space-y-4">
+      <!-- Mammal Recording Card -->
+      <div class="bg-white rounded-2xl p-4 border border-slate-300 shadow-xs">
+        <div class="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h2 class="text-base font-extrabold text-slate-900">Mammal Sightings & Field Signs</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Record peak single-visit live count or tick field signs (tracks, droppings, molehills).</p>
+          </div>
+        </div>
+
+        <div id="mammals-list-container" class="divide-y divide-slate-200">
+          <!-- Rendered dynamically by JS -->
+        </div>
+
+        <!-- Custom Mammal Quick Add -->
+        <div class="mt-3 pt-3 border-t border-slate-200 flex gap-2">
+          <input id="custom-mammal-input" type="text" placeholder="Add another mammal (e.g. Stoat, Muntjac)..."
+            class="flex-1 bg-slate-100 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white" />
+          <button onclick="addCustomMammal()" class="tap-btn bg-slate-800 text-white text-xs font-bold px-3.5 py-2 rounded-xl">Add</button>
+        </div>
+      </div>
+
+      <!-- Colonial Nesters Card -->
+      <div class="bg-white rounded-2xl p-4 border border-slate-300 shadow-xs">
+        <h2 class="text-base font-extrabold text-slate-900">Colonial Nesters (Separate from Transect)</h2>
+        <p class="text-xs text-slate-500 mt-0.5 mb-3">Log apparently occupied nests for Rookeries, Heronries, Gull colonies, or Sand Martin banks.</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+          <input id="colony-species" type="text" placeholder="Species (e.g. Rook)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+          <input id="colony-nests" type="number" min="1" placeholder="Occupied Nests" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold" />
+          <div class="flex gap-2">
+            <select id="colony-section" class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-2 text-sm font-semibold">
+              <option value="1">Nearest Sec 1</option>
+              <option value="2">Nearest Sec 2</option>
+              <option value="3">Nearest Sec 3</option>
+              <option value="4">Nearest Sec 4</option>
+              <option value="5">Nearest Sec 5</option>
+              <option value="6">Nearest Sec 6</option>
+              <option value="7">Nearest Sec 7</option>
+              <option value="8">Nearest Sec 8</option>
+              <option value="9">Nearest Sec 9</option>
+              <option value="10">Nearest Sec 10</option>
+            </select>
+            <button onclick="addColony()" class="tap-btn bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl">Add</button>
+          </div>
+        </div>
+
+        <div id="colonies-list-container" class="space-y-2">
+          <!-- Rendered dynamically by JS -->
+        </div>
+      </div>
+
+      <!-- General Field Notes -->
+      <div class="bg-white rounded-2xl p-4 border border-slate-300 shadow-xs">
+        <h2 class="text-base font-extrabold text-slate-900 mb-1">Field & Habitat Notes</h2>
+        <p class="text-xs text-slate-500 mb-2">Note crop changes, juvenile birds excluded from counts, or unusual flocks for BBS-Online comments.</p>
+        <textarea id="field-notes-input" rows="3" placeholder="e.g. Section 4 now winter wheat; 3 fledgling Blackbirds seen in Sec 2 (excluded from counts)..."
+          class="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white"></textarea>
+      </div>
+    </section>
+
+    <!-- TAB 4: BBS-ONLINE SUMMARY & EXPORT -->
+    <section id="view-summary" class="hidden space-y-4">
+      <!-- Action Buttons -->
+      <div class="bg-white rounded-2xl p-4 border border-slate-300 shadow-xs space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-extrabold text-slate-900">BBS-Online Transcription Matrix</h2>
+            <p class="text-xs text-slate-500">Totals grouped by Section (1–10) & Distance Band (1, 2, 3, F) ready for portal entry.</p>
+          </div>
+          <span id="summary-grand-total" class="bg-emerald-100 text-emerald-900 font-extrabold text-xs px-3 py-1.5 rounded-full border border-emerald-300">
+            0 Total Birds
+          </span>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <button onclick="copySummaryToClipboard()" class="tap-btn bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+            Copy Summary
+          </button>
+          <button onclick="exportCSV()" class="tap-btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            Export CSV
+          </button>
+          <button onclick="promptResetSurvey()" class="tap-btn col-span-2 sm:col-span-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs py-2.5 px-3 rounded-xl">
+            Reset Visit Data
+          </button>
+        </div>
+      </div>
+
+      <!-- Matrix Table (Horizontally scrollable on mobile with sticky Species column) -->
+      <div class="bg-white rounded-2xl border border-slate-300 shadow-xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table id="bbs-matrix-table" class="w-full text-left border-collapse text-xs">
+            <!-- Rendered dynamically by JS -->
+          </table>
+        </div>
+      </div>
+
+      <!-- Mammals & Colonies Summary Preview -->
+      <div id="summary-extras-box" class="bg-white rounded-2xl p-4 border border-slate-300 shadow-xs space-y-2 text-xs">
+        <!-- Rendered dynamically by JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAVIGATION BAR -->
+  <nav class="fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-300 shadow-lg">
+    <div class="max-w-2xl mx-auto grid grid-cols-4 h-16">
+      <button onclick="switchTab('birds')" id="nav-birds" class="flex flex-col items-center justify-center gap-0.5 font-extrabold text-[11px] sm:text-xs border-t-4 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+        <span>Birds</span>
+      </button>
+      <button onclick="switchTab('map')" id="nav-map" class="flex flex-col items-center justify-center gap-0.5 font-extrabold text-[11px] sm:text-xs border-t-4 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+        <span>Transect Map</span>
+      </button>
+      <button onclick="switchTab('mammals')" id="nav-mammals" class="flex flex-col items-center justify-center gap-0.5 font-extrabold text-[11px] sm:text-xs border-t-4 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <span>Mammals</span>
+      </button>
+      <button onclick="switchTab('summary')" id="nav-summary" class="flex flex-col items-center justify-center gap-0.5 font-extrabold text-[11px] sm:text-xs border-t-4 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        <span>Matrix</span>
+      </button>
+    </div>
+  </nav>
+
+  <script>
+    // =========================================================================
+    // 1. DEFAULT SPECIES & MAMMAL DEFINITIONS (Official BTO 2-letter codes)
+    // =========================================================================
+    const DEFAULT_SPECIES = [
+      { code: 'WP', name: 'Woodpigeon', pinned: true },
+      { code: 'R.', name: 'Robin', pinned: true },
+      { code: 'B.', name: 'Blackbird', pinned: true },
+      { code: 'WR', name: 'Wren', pinned: true },
+      { code: 'BT', name: 'Blue Tit', pinned: true },
+      { code: 'GT', name: 'Great Tit', pinned: true },
+      { code: 'CH', name: 'Chaffinch', pinned: true },
+      { code: 'CC', name: 'Chiffchaff', pinned: true },
+      { code: 'BC', name: 'Blackcap', pinned: true },
+      { code: 'S.', name: 'Skylark', pinned: true },
+      { code: 'SL', name: 'Swallow', pinned: true },
+      { code: 'BZ', name: 'Buzzard', pinned: true },
+      { code: 'C.', name: 'Carrion Crow', pinned: false },
+      { code: 'MG', name: 'Magpie', pinned: false },
+      { code: 'JD', name: 'Jackdaw', pinned: false },
+      { code: 'RO', name: 'Rook', pinned: false },
+      { code: 'SG', name: 'Starling', pinned: false },
+      { code: 'ST', name: 'Song Thrush', pinned: false },
+      { code: 'M.', name: 'Mistle Thrush', pinned: false },
+      { code: 'D.', name: 'Dunnock', pinned: false },
+      { code: 'GR', name: 'Greenfinch', pinned: false },
+      { code: 'GO', name: 'Goldfinch', pinned: false },
+      { code: 'LI', name: 'Linnet', pinned: false },
+      { code: 'Y.', name: 'Yellowhammer', pinned: false },
+      { code: 'WH', name: 'Whitethroat', pinned: false },
+      { code: 'WW', name: 'Willow Warbler', pinned: false },
+      { code: 'GS', name: 'Great Spotted Woodpecker', pinned: false },
+      { code: 'G.', name: 'Green Woodpecker', pinned: false },
+      { code: 'PH', name: 'Pheasant', pinned: false },
+      { code: 'MA', name: 'Mallard', pinned: false },
+      { code: 'HM', name: 'House Martin', pinned: false },
+      { code: 'SI', name: 'Swift', pinned: false },
+      { code: 'HS', name: 'House Sparrow', pinned: false },
+      { code: 'PW', name: 'Pied Wagtail', pinned: false },
+      { code: 'HG', name: 'Herring Gull', pinned: false },
+      { code: 'LB', name: 'Lesser Black-backed Gull', pinned: false },
+      { code: 'BH', name: 'Black-headed Gull', pinned: false },
+      { code: 'K.', name: 'Kestrel', pinned: false }
+    ];
+
+    const DEFAULT_MAMMALS = [
+      { id: 'roe_deer', name: 'Roe Deer', count: 0, sign: false },
+      { id: 'grey_squirrel', name: 'Grey Squirrel', count: 0, sign: false },
+      { id: 'rabbit', name: 'Rabbit', count: 0, sign: false },
+      { id: 'brown_hare', name: 'Brown Hare', count: 0, sign: false },
+      { id: 'fox', name: 'Red Fox', count: 0, sign: false },
+      { id: 'badger', name: 'Badger', count: 0, sign: false },
+      { id: 'mole', name: 'Mole (Molehills)', count: 0, sign: false },
+      { id: 'hedgehog', name: 'Hedgehog', count: 0, sign: false }
+    ];
+
+    const STORAGE_KEY = 'bto_bbs_field_recorder_v1';
+
+    // Default OS Grid Square ST4364 boundary (~1km x 1km near Congresbury / Banwell, North Somerset)
+    const DEFAULT_SQUARE_BOUNDS = {
+      south: 51.3705,
+      north: 51.3795,
+      west: -2.8222,
+      east: -2.8078
+    };
+
+    // Two parallel 1km transect lines inside ST4364 (~250m from edges, ~500m apart)
+    function createDefaultRoute() {
+      return {
+        t1Start: [51.3707, -2.8186],
+        t1End: [51.3793, -2.8186],
+        t2Start: [51.3793, -2.8114],
+        t2End: [51.3707, -2.8114],
+        customSectionPolylines: null // Optional array of 10 polylines when imported via GPX
+      };
+    }
+
+    // =========================================================================
+    // 2. APPLICATION STATE & SAFE PERSISTENCE
+    // =========================================================================
+    function createInitialState() {
+      const today = new Date().toISOString().split('T')[0];
+      return {
+        gridSquare: 'ST4364',
+        visitType: 'Early',
+        visitDate: today,
+        times: {
+          t1Start: '',
+          t1End: '',
+          t2Start: '',
+          t2End: ''
+        },
+        weather: {
+          cloud: 1,
+          rain: 1,
+          wind: 1,
+          vis: 1
+        },
+        activeSection: 1, // 1..10
+        activeTab: 'birds', // 'birds' | 'map' | 'mammals' | 'summary'
+        autoAdvanceSection: false,
+        route: createDefaultRoute(),
+        speciesFilter: 'all', // 'all' | 'recorded' | 'section'
+        searchQuery: '',
+        speciesList: JSON.parse(JSON.stringify(DEFAULT_SPECIES)),
+        // counts[speciesCode][sectionNumber (1..10)] = { b1: 0, b2: 0, b3: 0, f: 0 }
+        counts: {},
+        mammals: JSON.parse(JSON.stringify(DEFAULT_MAMMALS)),
+        colonies: [], // { id, species, nests, section }
+        notes: ''
+      };
+    }
+
+    let state = loadState();
+
+    function loadState() {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (!raw) return createInitialState();
+        const parsed = JSON.parse(raw);
+        const base = createInitialState();
+        return {
+          ...base,
+          ...parsed,
+          route: parsed.route ? { ...createDefaultRoute(), ...parsed.route } : createDefaultRoute()
+        };
+      } catch (err) {
+        // Fallback gracefully in restricted/sandboxed iframe environments
+        return createInitialState();
+      }
+    }
+
+    function saveState() {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (err) {
+        // Ignore storage errors in private/sandboxed views while keeping in-memory state intact
+      }
+    }
+
+    // Helper to ensure counts object exists for a species and section
+    function getCell(code, section) {
+      if (!state.counts[code]) state.counts[code] = {};
+      if (!state.counts[code][section]) {
+        state.counts[code][section] = { b1: 0, b2: 0, b3: 0, f: 0 };
+      }
+      return state.counts[code][section];
+    }
+
+    // =========================================================================
+    // 3. UI FEEDBACK & MODALS
+    // =========================================================================
+    let toastTimer = null;
+    function showToast(msg) {
+      const banner = document.getElementById('toast-banner');
+      const text = document.getElementById('toast-text');
+      text.textContent = msg;
+      banner.classList.remove('opacity-0');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        banner.classList.add('opacity-0');
+      }, 1800);
+    }
+
+    let confirmCallback = null;
+    function showConfirmModal(title, desc, onConfirm) {
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-desc').textContent = desc;
+      confirmCallback = onConfirm;
+      document.getElementById('confirm-modal').classList.remove('hidden');
+    }
+
+    document.getElementById('modal-cancel').addEventListener('click', () => {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      confirmCallback = null;
+    });
+
+    document.getElementById('modal-confirm').addEventListener('click', () => {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      if (confirmCallback) confirmCallback();
+      confirmCallback = null;
+    });
+
+    // =========================================================================
+    // 4. HEADER & METADATA HANDLERS
+    // =========================================================================
+    function toggleSetupDrawer() {
+      const drawer = document.getElementById('setup-drawer');
+      const chev = document.getElementById('setup-chevron');
+      drawer.classList.toggle('hidden');
+      chev.classList.toggle('rotate-180');
+    }
+
+    function setVisitType(type) {
+      state.visitType = type;
+      saveState();
+      renderHeader();
+    }
+
+    function stampTime(field) {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      state.times[field] = `${hh}:${mm}`;
+      saveState();
+      renderHeader();
+      showToast(`Stamped ${hh}:${mm}`);
+    }
+
+    function setWeather(key, val) {
+      state.weather[key] = val;
+      saveState();
+      renderHeader();
+    }
+
+    function calcDurationMinutes(startStr, endStr) {
+      if (!startStr || !endStr) return null;
+      const [sh, sm] = startStr.split(':').map(Number);
+      const [eh, em] = endStr.split(':').map(Number);
+      const diff = (eh * 60 + em) - (sh * 60 + sm);
+      return diff >= 0 ? `${diff} min` : null;
+    }
+
+    function renderHeader() {
+      document.getElementById('grid-square-input').value = state.gridSquare;
+      document.getElementById('visit-date-input').value = state.visitDate;
+      const mapTitle = document.getElementById('map-square-title');
+      if (mapTitle) mapTitle.textContent = `${state.gridSquare || 'ST4364'} Transect Map`;
+
+      const earlyBtn = document.getElementById('btn-visit-early');
+      const lateBtn = document.getElementById('btn-visit-late');
+      if (state.visitType === 'Early') {
+        earlyBtn.className = 'px-2.5 py-1 rounded-lg text-xs font-extrabold bg-emerald-700 text-white shadow-xs';
+        lateBtn.className = 'px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900';
+      } else {
+        lateBtn.className = 'px-2.5 py-1 rounded-lg text-xs font-extrabold bg-amber-500 text-slate-950 shadow-xs';
+        earlyBtn.className = 'px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 hover:text-slate-900';
+      }
+
+      document.getElementById('t1-start-disp').textContent = state.times.t1Start || '--:--';
+      document.getElementById('t1-end-disp').textContent = state.times.t1End || '--:--';
+      document.getElementById('t2-start-disp').textContent = state.times.t2Start || '--:--';
+      document.getElementById('t2-end-disp').textContent = state.times.t2End || '--:--';
+
+      document.getElementById('t1-duration').textContent = calcDurationMinutes(state.times.t1Start, state.times.t1End) || '-- min';
+      document.getElementById('t2-duration').textContent = calcDurationMinutes(state.times.t2Start, state.times.t2End) || '-- min';
+
+      // Render Weather 1/2/3 selector buttons
+      const weatherFields = ['cloud', 'rain', 'wind', 'vis'];
+      weatherFields.forEach(field => {
+        const container = document.getElementById(`weather-${field}`);
+        container.innerHTML = [1, 2, 3].map(num => {
+          const active = state.weather[field] === num;
+          const cls = active
+            ? 'bg-slate-900 text-white border-slate-900 font-extrabold'
+            : 'bg-white text-slate-700 border-slate-300 font-semibold hover:bg-slate-100';
+          return `<button onclick="setWeather('${field}', ${num})" class="py-1 rounded-lg border text-xs ${cls}">${num}</button>`;
+        }).join('');
+      });
+
+      // Update Grand Total
+      const total = getGrandTotalBirds();
+      document.getElementById('header-total-birds').textContent = `${total} bird${total === 1 ? '' : 's'}`;
+    }
+
+    document.getElementById('grid-square-input').addEventListener('input', (e) => {
+      state.gridSquare = e.target.value.toUpperCase();
+      const mapTitle = document.getElementById('map-square-title');
+      if (mapTitle) mapTitle.textContent = `${state.gridSquare || 'ST4364'} Transect Map`;
+      saveState();
+      if (bbsMap) renderMapFeatures();
+    });
+
+    document.getElementById('visit-date-input').addEventListener('change', (e) => {
+      state.visitDate = e.target.value;
+      saveState();
+    });
+
+    // =========================================================================
+    // 5. SECTION SELECTOR & NAVIGATION (1 to 10)
+    // =========================================================================
+    function getSectionTotal(sec) {
+      let sum = 0;
+      for (const code in state.counts) {
+        const cell = state.counts[code][sec];
+        if (cell) {
+          sum += (cell.b1 || 0) + (cell.b2 || 0) + (cell.b3 || 0) + (cell.f || 0);
+        }
+      }
+      return sum;
+    }
+
+    function getGrandTotalBirds() {
+      let total = 0;
+      for (let s = 1; s <= 10; s++) {
+        total += getSectionTotal(s);
+      }
+      return total;
+    }
+
+    function selectSection(sec) {
+      state.activeSection = sec;
+      saveState();
+      renderSectionBar();
+      renderSpeciesList();
+      if (bbsMap) renderMapFeatures();
+      // Auto-scroll active pill into view
+      const activePill = document.getElementById(`sec-pill-${sec}`);
+      if (activePill) {
+        activePill.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+
+    function goNextSection() {
+      if (state.activeSection < 10) {
+        const next = state.activeSection + 1;
+        if (state.activeSection === 5) {
+          showToast('Starting Transect 2 (Section 6)');
+        } else {
+          showToast(`Moved to Section ${next}`);
+        }
+        selectSection(next);
+      } else {
+        switchTab('summary');
+        showToast('Transect 2 complete — viewing Summary');
+      }
+    }
+
+    function renderSectionBar() {
+      const sec = state.activeSection;
+      const isT1 = sec <= 5;
+      const badge = document.getElementById('transect-badge');
+      badge.textContent = isT1 ? 'Transect 1 (200m)' : 'Transect 2 (200m)';
+      badge.className = `text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded ${isT1 ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`;
+
+      document.getElementById('active-sec-label').textContent = sec;
+      document.getElementById('active-sec-count').textContent = getSectionTotal(sec);
+
+      const nextBtnLabel = document.getElementById('next-sec-btn-label');
+      if (sec < 10) {
+        nextBtnLabel.textContent = sec === 5 ? 'Start T2 (Sec 6)' : `Next Sec ${sec + 1}`;
+      } else {
+        nextBtnLabel.textContent = 'Finish & Review';
+      }
+
+      const container = document.getElementById('section-pills-container');
+      let html = '';
+      for (let i = 1; i <= 10; i++) {
+        if (i === 6) {
+          html += `<div class="h-7 w-0.5 bg-slate-600 mx-1 shrink-0 rounded-full" title="Transect 2 Break"></div>`;
+        }
+        const count = getSectionTotal(i);
+        const isActive = i === sec;
+        const baseCls = isActive
+          ? (i <= 5 ? 'bg-emerald-500 text-slate-950 border-emerald-300 ring-2 ring-emerald-300/50' : 'bg-blue-400 text-slate-950 border-blue-200 ring-2 ring-blue-200/50')
+          : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700';
+
+        html += `
+          <button id="sec-pill-${i}" onclick="selectSection(${i})"
+            class="tap-btn shrink-0 min-w-[3.1rem] px-2 py-1.5 rounded-xl border flex flex-col items-center justify-center ${baseCls}">
+            <span class="text-xs font-extrabold leading-none">S${i}</span>
+            <span class="text-[10px] font-bold mt-0.5 ${isActive ? 'text-slate-900' : 'text-slate-400'}">${count > 0 ? count : '·'}</span>
+          </button>
+        `;
+      }
+      container.innerHTML = html;
+    }
+
+    // =========================================================================
+    // 6. BIRD COUNTING & SPECIES MANAGEMENT
+    // =========================================================================
+    function incrementBand(code, bandKey, btnEl) {
+      const sec = state.activeSection;
+      const cell = getCell(code, sec);
+      cell[bandKey] = (cell[bandKey] || 0) + 1;
+      saveState();
+
+      if (btnEl) {
+        btnEl.classList.remove('pop-anim');
+        void btnEl.offsetWidth;
+        btnEl.classList.add('pop-anim');
+      }
+
+      renderSectionBar();
+      renderHeader();
+      renderSpeciesList();
+    }
+
+    function decrementSpecificBand(event, code, bandKey) {
+      event.stopPropagation();
+      const sec = state.activeSection;
+      const cell = getCell(code, sec);
+      if (cell[bandKey] > 0) {
+        cell[bandKey] -= 1;
+        saveState();
+        renderSectionBar();
+        renderHeader();
+        renderSpeciesList();
+      }
+    }
+
+    function togglePinSpecies(code) {
+      const sp = state.speciesList.find(s => s.code === code);
+      if (sp) {
+        sp.pinned = !sp.pinned;
+        saveState();
+        renderSpeciesList();
+      }
+    }
+
+    function setSpeciesFilter(mode) {
+      state.speciesFilter = mode;
+      renderSpeciesList();
+    }
+
+    function clearSearch() {
+      state.searchQuery = '';
+      document.getElementById('species-search').value = '';
+      document.getElementById('clear-search-btn').classList.add('hidden');
+      renderSpeciesList();
+    }
+
+    document.getElementById('species-search').addEventListener('input', (e) => {
+      state.searchQuery = e.target.value.trim().toLowerCase();
+      const clearBtn = document.getElementById('clear-search-btn');
+      if (state.searchQuery) clearBtn.classList.remove('hidden');
+      else clearBtn.classList.add('hidden');
+      renderSpeciesList();
+    });
+
+    // Custom Species Modal Logic
+    function openAddSpeciesModal() {
+      document.getElementById('custom-sp-name').value = '';
+      document.getElementById('custom-sp-code').value = '';
+      document.getElementById('add-species-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('custom-sp-name').focus(), 50);
+    }
+
+    document.getElementById('close-add-sp').addEventListener('click', () => {
+      document.getElementById('add-species-modal').classList.add('hidden');
+    });
+
+    document.getElementById('save-add-sp').addEventListener('click', () => {
+      const name = document.getElementById('custom-sp-name').value.trim();
+      let code = document.getElementById('custom-sp-code').value.trim().toUpperCase();
+      if (!name) {
+        showToast('Please enter a species name');
+        return;
+      }
+      if (!code) {
+        const parts = name.split(/\s+/);
+        code = parts.length > 1 ? (parts[0][0] + parts[1][0]).toUpperCase() : (name[0] + '.').toUpperCase();
+      }
+      const existing = state.speciesList.find(s => s.code === code);
+      if (existing) {
+        existing.pinned = true;
+        showToast(`${existing.name} (${code}) pinned to top`);
+      } else {
+        state.speciesList.unshift({ code, name, pinned: true });
+        showToast(`Added ${name} (${code})`);
+      }
+      saveState();
+      document.getElementById('add-species-modal').classList.add('hidden');
+      clearSearch();
+      renderSpeciesList();
+    });
+
+    function getSpeciesVisitTotal(code) {
+      let sum = 0;
+      if (!state.counts[code]) return 0;
+      for (let s = 1; s <= 10; s++) {
+        const c = state.counts[code][s];
+        if (c) sum += (c.b1 || 0) + (c.b2 || 0) + (c.b3 || 0) + (c.f || 0);
+      }
+      return sum;
+    }
+
+    function renderSpeciesList() {
+      const sec = state.activeSection;
+      const q = state.searchQuery;
+
+      document.getElementById('filter-all').textContent = `All (${state.speciesList.length})`;
+      ['all', 'recorded', 'section'].forEach(mode => {
+        const btn = document.getElementById(`filter-${mode}`);
+        if (state.speciesFilter === mode) {
+          btn.className = 'px-2.5 py-1 rounded-lg font-extrabold bg-slate-900 text-white';
+        } else {
+          btn.className = 'px-2.5 py-1 rounded-lg font-bold bg-slate-100 text-slate-600 hover:bg-slate-200';
+        }
+      });
+
+      const filtered = state.speciesList
+        .filter(sp => {
+          if (q && !sp.name.toLowerCase().includes(q) && !sp.code.toLowerCase().includes(q)) {
+            return false;
+          }
+          if (state.speciesFilter === 'recorded') {
+            return getSpeciesVisitTotal(sp.code) > 0;
+          }
+          if (state.speciesFilter === 'section') {
+            const c = getCell(sp.code, sec);
+            return (c.b1 + c.b2 + c.b3 + c.f) > 0;
+          }
+          return true;
+        })
+        .sort((a, b) => (b.pinned === a.pinned ? 0 : b.pinned ? 1 : -1));
+
+      const container = document.getElementById('species-list-container');
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-2xl p-6 text-center border border-slate-300">
+            <p class="text-sm font-bold text-slate-700">No matching species found</p>
+            <p class="text-xs text-slate-500 mt-1">Try clearing your search or tap "+ Species" above to add a new bird.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(sp => {
+        const cell = getCell(sp.code, sec);
+        const secSum = cell.b1 + cell.b2 + cell.b3 + cell.f;
+        const visitSum = getSpeciesVisitTotal(sp.code);
+
+        const renderBandBtn = (bandKey, label, count, activeColors, idleColors) => {
+          const hasCount = count > 0;
+          const cls = hasCount ? activeColors : idleColors;
+          return `
+            <div class="relative">
+              <button onclick="incrementBand('${sp.code}', '${bandKey}', this)"
+                class="tap-btn w-full h-14 rounded-xl border-2 flex flex-col items-center justify-center ${cls}">
+                <span class="text-[11px] font-extrabold uppercase opacity-80 leading-none">${label}</span>
+                <span class="text-lg font-black leading-tight mt-0.5">${count}</span>
+              </button>
+              ${hasCount ? `
+                <button onclick="decrementSpecificBand(event, '${sp.code}', '${bandKey}')" title="Subtract 1 from ${label}"
+                  class="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center shadow border border-white active:scale-90">
+                  −
+                </button>
+              ` : ''}
+            </div>
+          `;
+        };
+
+        return `
+          <div class="bg-white rounded-2xl p-2.5 border ${secSum > 0 ? 'border-emerald-400 shadow-sm' : 'border-slate-300 shadow-xs'}">
+            <!-- Top Row: Star Pin, Species Name, BTO Code, Section/Visit Totals -->
+            <div class="flex items-center justify-between gap-2 mb-2 px-0.5">
+              <div class="flex items-center gap-2 min-w-0">
+                <button onclick="togglePinSpecies('${sp.code}')" aria-label="Pin species"
+                  class="p-1 rounded-lg ${sp.pinned ? 'text-amber-500' : 'text-slate-300 hover:text-slate-500'}">
+                  <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                </button>
+                <span class="font-extrabold text-sm sm:text-base text-slate-900 truncate">${sp.name}</span>
+                <span class="text-xs font-black bg-slate-100 text-slate-700 border border-slate-300 px-1.5 py-0.5 rounded-md shrink-0">${sp.code}</span>
+              </div>
+
+              <div class="flex items-center gap-2 shrink-0">
+                ${visitSum > 0 ? `<span class="text-[11px] font-bold text-slate-500">All: ${visitSum}</span>` : ''}
+                ${secSum > 0 ? `
+                  <span class="text-xs font-extrabold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">
+                    S${sec}: ${secSum}
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- 4 Large Thumb-Friendly Distance Band Tap Buttons -->
+            <div class="grid grid-cols-4 gap-2">
+              ${renderBandBtn('b1', '1 (0-25m)', cell.b1,
+                'bg-emerald-600 text-white border-emerald-700 shadow-xs',
+                'bg-emerald-50/70 text-emerald-950 border-emerald-200 hover:bg-emerald-100')}
+              ${renderBandBtn('b2', '2 (25-100)', cell.b2,
+                'bg-sky-600 text-white border-sky-700 shadow-xs',
+                'bg-sky-50/70 text-sky-950 border-sky-200 hover:bg-sky-100')}
+              ${renderBandBtn('b3', '3 (>100m)', cell.b3,
+                'bg-indigo-600 text-white border-indigo-700 shadow-xs',
+                'bg-indigo-50/70 text-indigo-950 border-indigo-200 hover:bg-indigo-100')}
+              ${renderBandBtn('f', 'F (Flight)', cell.f,
+                'bg-amber-500 text-slate-950 border-amber-600 shadow-xs',
+                'bg-amber-50/70 text-amber-950 border-amber-200 hover:bg-amber-100')}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // =========================================================================
+    // 7. MAMMALS, COLONIES & FIELD NOTES
+    // =========================================================================
+    function updateMammalCount(id, delta) {
+      const m = state.mammals.find(x => x.id === id);
+      if (!m) return;
+      m.count = Math.max(0, (m.count || 0) + delta);
+      saveState();
+      renderMammalsAndColonies();
+    }
+
+    function toggleMammalSign(id) {
+      const m = state.mammals.find(x => x.id === id);
+      if (!m) return;
+      m.sign = !m.sign;
+      saveState();
+      renderMammalsAndColonies();
+    }
+
+    function addCustomMammal() {
+      const input = document.getElementById('custom-mammal-input');
+      const name = input.value.trim();
+      if (!name) return;
+      const id = 'm_' + Date.now();
+      state.mammals.push({ id, name, count: 1, sign: false });
+      input.value = '';
+      saveState();
+      renderMammalsAndColonies();
+      showToast(`Added ${name}`);
+    }
+
+    function addColony() {
+      const spInput = document.getElementById('colony-species');
+      const nestsInput = document.getElementById('colony-nests');
+      const secSelect = document.getElementById('colony-section');
+
+      const species = spInput.value.trim();
+      const nests = parseInt(nestsInput.value, 10);
+      const section = parseInt(secSelect.value, 10);
+
+      if (!species || isNaN(nests) || nests < 1) {
+        showToast('Enter colony species & nest count');
+        return;
+      }
+
+      state.colonies.push({ id: Date.now(), species, nests, section });
+      spInput.value = '';
+      nestsInput.value = '';
+      saveState();
+      renderMammalsAndColonies();
+      showToast(`Added ${species} colony (${nests} nests)`);
+    }
+
+    function removeColony(id) {
+      state.colonies = state.colonies.filter(c => c.id !== id);
+      saveState();
+      renderMammalsAndColonies();
+    }
+
+    document.getElementById('field-notes-input').addEventListener('input', (e) => {
+      state.notes = e.target.value;
+      saveState();
+    });
+
+    function renderMammalsAndColonies() {
+      const mContainer = document.getElementById('mammals-list-container');
+      mContainer.innerHTML = state.mammals.map(m => `
+        <div class="py-2.5 flex items-center justify-between gap-2">
+          <div>
+            <div class="font-bold text-sm text-slate-900">${m.name}</div>
+            <label class="inline-flex items-center gap-1.5 mt-1 cursor-pointer">
+              <input type="checkbox" ${m.sign ? 'checked' : ''} onchange="toggleMammalSign('${m.id}')"
+                class="w-4 h-4 rounded accent-emerald-700" />
+              <span class="text-xs font-semibold text-slate-600">Field signs / tracks / droppings</span>
+            </label>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="updateMammalCount('${m.id}', -1)" class="tap-btn w-9 h-9 rounded-xl bg-slate-100 border border-slate-300 font-black text-base text-slate-800">−</button>
+            <span class="w-8 text-center font-black text-base ${m.count > 0 ? 'text-emerald-800' : 'text-slate-400'}">${m.count}</span>
+            <button onclick="updateMammalCount('${m.id}', 1)" class="tap-btn w-9 h-9 rounded-xl bg-emerald-700 text-white font-black text-base">+</button>
+          </div>
+        </div>
+      `).join('');
+
+      const cContainer = document.getElementById('colonies-list-container');
+      if (state.colonies.length === 0) {
+        cContainer.innerHTML = `<p class="text-xs text-slate-400 italic">No breeding colonies logged yet.</p>`;
+      } else {
+        cContainer.innerHTML = state.colonies.map(c => `
+          <div class="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+            <div>
+              <span class="font-extrabold text-sm text-slate-900">${c.species}</span>
+              <span class="text-xs font-bold text-amber-900 ml-2">${c.nests} nests (near Sec ${c.section})</span>
+            </div>
+            <button onclick="removeColony(${c.id})" class="text-xs font-bold text-rose-600 hover:text-rose-800 px-2 py-1">Remove</button>
+          </div>
+        `).join('');
+      }
+
+      document.getElementById('field-notes-input').value = state.notes || '';
+    }
+
+    // =========================================================================
+    // 8. SUMMARY MATRIX, CSV EXPORT & CLIPBOARD COPY
+    // =========================================================================
+    function getRecordedSpecies() {
+      return state.speciesList.filter(sp => getSpeciesVisitTotal(sp.code) > 0);
+    }
+
+    function renderSummaryTab() {
+      const recorded = getRecordedSpecies();
+      const grandTotal = getGrandTotalBirds();
+      document.getElementById('summary-grand-total').textContent = `${grandTotal} Total Bird${grandTotal === 1 ? '' : 's'}`;
+
+      const table = document.getElementById('bbs-matrix-table');
+      if (recorded.length === 0) {
+        table.innerHTML = `
+          <tbody>
+            <tr>
+              <td class="p-6 text-center text-slate-500 font-medium">
+                No birds recorded yet. Switch to the <strong>Birds</strong> tab to log sightings.
+              </td>
+            </tr>
+          </tbody>
+        `;
+      } else {
+        let head1 = `
+          <thead>
+            <tr class="bg-slate-900 text-white">
+              <th rowspan="2" class="sticky left-0 z-10 bg-slate-900 px-3 py-2 font-extrabold border-r border-slate-700 min-w-[120px]">Species</th>
+        `;
+        for (let s = 1; s <= 10; s++) {
+          const bg = s <= 5 ? 'bg-emerald-950' : 'bg-blue-950';
+          head1 += `<th colspan="4" class="${bg} text-center py-1.5 px-1 font-extrabold border-r border-slate-700">Sec ${s}</th>`;
+        }
+        head1 += `<th rowspan="2" class="px-3 py-2 text-center font-extrabold bg-slate-800">Total</th></tr>`;
+
+        let head2 = `<tr class="bg-slate-800 text-slate-200 text-[10px]">`;
+        for (let s = 1; s <= 10; s++) {
+          head2 += `
+            <th class="px-1.5 py-1 text-center font-bold">1</th>
+            <th class="px-1.5 py-1 text-center font-bold">2</th>
+            <th class="px-1.5 py-1 text-center font-bold">3</th>
+            <th class="px-1.5 py-1 text-center font-bold border-r border-slate-700 text-amber-300">F</th>
+          `;
+        }
+        head2 += `</tr></thead>`;
+
+        let body = `<tbody class="divide-y divide-slate-200">`;
+        recorded.forEach(sp => {
+          const rowTotal = getSpeciesVisitTotal(sp.code);
+          body += `
+            <tr class="hover:bg-slate-50">
+              <td class="sticky left-0 z-10 bg-white px-3 py-2 font-bold text-slate-900 border-r border-slate-300 whitespace-nowrap">
+                ${sp.name} <span class="text-[10px] font-black text-slate-500">(${sp.code})</span>
+              </td>
+          `;
+          for (let s = 1; s <= 10; s++) {
+            const c = getCell(sp.code, s);
+            const fmt = (v, isF = false) => v > 0
+              ? `<span class="font-black ${isF ? 'text-amber-700' : 'text-slate-900'}">${v}</span>`
+              : `<span class="text-slate-300">·</span>`;
+            body += `
+              <td class="px-1.5 py-2 text-center">${fmt(c.b1)}</td>
+              <td class="px-1.5 py-2 text-center">${fmt(c.b2)}</td>
+              <td class="px-1.5 py-2 text-center">${fmt(c.b3)}</td>
+              <td class="px-1.5 py-2 text-center border-r border-slate-200 bg-amber-50/30">${fmt(c.f, true)}</td>
+            `;
+          }
+          body += `<td class="px-3 py-2 text-center font-black text-emerald-800 bg-emerald-50/50">${rowTotal}</td></tr>`;
+        });
+        body += `</tbody>`;
+
+        table.innerHTML = head1 + head2 + body;
+      }
+
+      const activeMammals = state.mammals.filter(m => m.count > 0 || m.sign);
+      const extrasBox = document.getElementById('summary-extras-box');
+      extrasBox.innerHTML = `
+        <div class="font-extrabold text-sm text-slate-900">Visit Metadata, Mammals & Colonies</div>
+        <div class="text-slate-600">
+          <strong>Square:</strong> ${state.gridSquare} | <strong>Visit:</strong> ${state.visitType} (${state.visitDate}) |
+          <strong>T1:</strong> ${state.times.t1Start || '--:--'}–${state.times.t1End || '--:--'} |
+          <strong>T2:</strong> ${state.times.t2Start || '--:--'}–${state.times.t2End || '--:--'} |
+          <strong>Weather (C/R/W/V):</strong> ${state.weather.cloud}/${state.weather.rain}/${state.weather.wind}/${state.weather.vis}
+        </div>
+        <div class="pt-1">
+          <strong>Mammals:</strong> ${activeMammals.length > 0
+            ? activeMammals.map(m => `${m.name}: ${m.count}${m.sign ? ' (+signs)' : ''}`).join(', ')
+            : 'None recorded'}
+        </div>
+        <div>
+          <strong>Colonies:</strong> ${state.colonies.length > 0
+            ? state.colonies.map(c => `${c.species} (${c.nests} nests, Sec ${c.section})`).join('; ')
+            : 'None recorded'}
+        </div>
+        ${state.notes ? `<div><strong>Notes:</strong> ${state.notes}</div>` : ''}
+      `;
+    }
+
+    function buildPlainTextSummary() {
+      const lines = [];
+      lines.push(`BTO BBS FIELD SUMMARY — ${state.gridSquare} (${state.visitType} Visit, ${state.visitDate})`);
+      lines.push(`Times: T1 ${state.times.t1Start || '--:--'}-${state.times.t1End || '--:--'} | T2 ${state.times.t2Start || '--:--'}-${state.times.t2End || '--:--'}`);
+      lines.push(`Weather (Cloud/Rain/Wind/Vis): ${state.weather.cloud}/${state.weather.rain}/${state.weather.wind}/${state.weather.vis}`);
+      lines.push('');
+      lines.push('BIRD COUNTS BY SECTION [Band1, Band2, Band3, Flight]:');
+
+      const recorded = getRecordedSpecies();
+      if (recorded.length === 0) {
+        lines.push('  No birds recorded.');
+      } else {
+        recorded.forEach(sp => {
+          const secParts = [];
+          for (let s = 1; s <= 10; s++) {
+            const c = getCell(sp.code, s);
+            if (c.b1 + c.b2 + c.b3 + c.f > 0) {
+              secParts.push(`S${s}[${c.b1},${c.b2},${c.b3},${c.f}]`);
+            }
+          }
+          lines.push(`  ${sp.name} (${sp.code}) [Total: ${getSpeciesVisitTotal(sp.code)}]: ${secParts.join(' | ')}`);
+        });
+      }
+
+      lines.push('');
+      const activeMammals = state.mammals.filter(m => m.count > 0 || m.sign);
+      lines.push('MAMMALS: ' + (activeMammals.length ? activeMammals.map(m => `${m.name}: ${m.count}${m.sign ? ' (signs)' : ''}`).join(', ') : 'None'));
+
+      if (state.colonies.length > 0) {
+        lines.push('COLONIES: ' + state.colonies.map(c => `${c.species} (${c.nests} nests, Sec ${c.section})`).join('; '));
+      }
+      if (state.notes) {
+        lines.push('NOTES: ' + state.notes);
+      }
+      return lines.join('\n');
+    }
+
+    function copySummaryToClipboard() {
+      const text = buildPlainTextSummary();
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        showToast('Summary copied to clipboard');
+      } catch (err) {
+        showToast('Unable to copy summary');
+      }
+      document.body.removeChild(textarea);
+    }
+
+    function exportCSV() {
+      const headers = ['Species', 'BTO_Code'];
+      for (let s = 1; s <= 10; s++) {
+        headers.push(`S${s}_B1`, `S${s}_B2`, `S${s}_B3`, `S${s}_F`);
+      }
+      headers.push('Visit_Total');
+
+      const rows = [headers.join(',')];
+      const recorded = getRecordedSpecies();
+      recorded.forEach(sp => {
+        const row = [`"${sp.name}"`, `"${sp.code}"`];
+        for (let s = 1; s <= 10; s++) {
+          const c = getCell(sp.code, s);
+          row.push(c.b1, c.b2, c.b3, c.f);
+        }
+        row.push(getSpeciesVisitTotal(sp.code));
+        rows.push(row.join(','));
+      });
+
+      const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent(rows.join('\n'));
+      const link = document.createElement('a');
+      link.setAttribute('href', csvContent);
+      link.setAttribute('download', `BBS_${state.gridSquare}_${state.visitType}_${state.visitDate}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('CSV exported');
+    }
+
+    function promptResetSurvey() {
+      showConfirmModal(
+        'Reset Visit Counts?',
+        'This will clear all bird counts, mammal records, colonies, and transect times for this visit (your pinned species list will be kept).',
+        () => {
+          const preservedSpecies = state.speciesList;
+          const preservedSquare = state.gridSquare;
+          state = createInitialState();
+          state.speciesList = preservedSpecies;
+          state.gridSquare = preservedSquare;
+          saveState();
+          renderAll();
+          showToast('Visit data cleared');
+        }
+      );
+    }
+
+    // =========================================================================
+    // 9. INTERACTIVE TRANSECT MAP, ROUTE EDITOR & LIVE GPS TRACKING
+    // =========================================================================
+    let bbsMap = null;
+    let mapLayersGroup = null;
+    let gpsLayerGroup = null;
+    let gpsWatchId = null;
+    let simWalkTimer = null;
+    let simProgress = 0;
+    let routeEditMode = false;
+    let lastUserLatLng = null;
+    let detectedNearestSec = null;
+
+    function haversineMeters(p1, p2) {
+      const R = 6371000;
+      const toRad = d => (d * Math.PI) / 180;
+      const dLat = toRad(p2[0] - p1[0]);
+      const dLng = toRad(p2[1] - p1[1]);
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(p1[0])) * Math.cos(toRad(p2[0])) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function subdivideTransect(startPt, endPt) {
+      const segments = [];
+      for (let i = 0; i < 5; i++) {
+        const t0 = i / 5;
+        const t1 = (i + 1) / 5;
+        const p0 = [
+          startPt[0] + (endPt[0] - startPt[0]) * t0,
+          startPt[1] + (endPt[1] - startPt[1]) * t0
+        ];
+        const p1 = [
+          startPt[0] + (endPt[0] - startPt[0]) * t1,
+          startPt[1] + (endPt[1] - startPt[1]) * t1
+        ];
+        segments.push([p0, p1]);
+      }
+      return segments;
+    }
+
+    function getAllTenSections() {
+      if (state.route.customSectionPolylines && state.route.customSectionPolylines.length === 10) {
+        return state.route.customSectionPolylines;
+      }
+      const t1Segs = subdivideTransect(state.route.t1Start, state.route.t1End);
+      const t2Segs = subdivideTransect(state.route.t2Start, state.route.t2End);
+      return [...t1Segs, ...t2Segs];
+    }
+
+    function pointToSegmentDistanceMeters(p, a, b) {
+      const latScale = 111320;
+      const lngScale = 111320 * Math.cos((p[0] * Math.PI) / 180);
+      const px = p[1] * lngScale, py = p[0] * latScale;
+      const ax = a[1] * lngScale, ay = a[0] * latScale;
+      const bx = b[1] * lngScale, by = b[0] * latScale;
+
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const projX = ax + t * dx;
+      const projY = ay + t * dy;
+      return Math.hypot(px - projX, py - projY);
+    }
+
+    function pointToPolylineDistanceMeters(p, poly) {
+      let minDist = Infinity;
+      for (let i = 0; i < poly.length - 1; i++) {
+        const d = pointToSegmentDistanceMeters(p, poly[i], poly[i + 1]);
+        if (d < minDist) minDist = d;
+      }
+      return minDist;
+    }
+
+    function initMapIfNeeded() {
+      if (bbsMap) {
+        setTimeout(() => bbsMap.invalidateSize(), 60);
+        return;
+      }
+      if (typeof L === 'undefined') {
+        showToast('Map library offline — check connection');
+        return;
+      }
+
+      const centerLat = (DEFAULT_SQUARE_BOUNDS.south + DEFAULT_SQUARE_BOUNDS.north) / 2;
+      const centerLng = (DEFAULT_SQUARE_BOUNDS.west + DEFAULT_SQUARE_BOUNDS.east) / 2;
+
+      bbsMap = L.map('bbs-leaflet-map', {
+        center: [centerLat, centerLng],
+        zoom: 15,
+        zoomControl: true
+      });
+
+      const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      });
+
+      const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        maxZoom: 17,
+        attribution: '&copy; OpenTopoMap'
+      });
+
+      const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: '&copy; Esri World Imagery'
+      });
+
+      osmLayer.addTo(bbsMap);
+      L.control.layers({
+        'OS / Street Map': osmLayer,
+        'Satellite Aerial': satelliteLayer,
+        'Topo Contours': topoLayer
+      }, null, { position: 'topright' }).addTo(bbsMap);
+
+      mapLayersGroup = L.layerGroup().addTo(bbsMap);
+      gpsLayerGroup = L.layerGroup().addTo(bbsMap);
+
+      renderMapFeatures();
+      syncRouteEditorInputs();
+    }
+
+    function renderMapFeatures() {
+      if (!bbsMap || !mapLayersGroup) return;
+      mapLayersGroup.clearLayers();
+
+      const sqBounds = [
+        [DEFAULT_SQUARE_BOUNDS.south, DEFAULT_SQUARE_BOUNDS.west],
+        [DEFAULT_SQUARE_BOUNDS.north, DEFAULT_SQUARE_BOUNDS.east]
+      ];
+      L.rectangle(sqBounds, {
+        color: '#475569',
+        weight: 2,
+        dashArray: '6, 6',
+        fillColor: '#94a3b8',
+        fillOpacity: 0.05
+      }).addTo(mapLayersGroup).bindTooltip(`${state.gridSquare} (1 km × 1 km)`, { sticky: false, direction: 'top' });
+
+      const sections = getAllTenSections();
+      sections.forEach((poly, idx) => {
+        const secNum = idx + 1;
+        const isActive = secNum === state.activeSection;
+        const isT1 = secNum <= 5;
+        const baseColor = isActive ? '#f59e0b' : (isT1 ? '#059669' : '#2563eb');
+
+        const line = L.polyline(poly, {
+          color: baseColor,
+          weight: isActive ? 7 : 5,
+          opacity: isActive ? 0.95 : 0.8
+        }).addTo(mapLayersGroup);
+
+        line.on('click', () => {
+          selectSection(secNum);
+          showToast(`Selected Section ${secNum}`);
+        });
+
+        const midIdx = Math.floor(poly.length / 2);
+        const midPt = poly.length === 2
+          ? [(poly[0][0] + poly[1][0]) / 2, (poly[0][1] + poly[1][1]) / 2]
+          : poly[midIdx];
+
+        const badgeIcon = L.divIcon({
+          className: '',
+          html: `<div class="sec-num-badge ${isActive ? 'active-sec' : ''}" style="width:24px;height:24px;">${secNum}</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        });
+
+        const marker = L.marker(midPt, { icon: badgeIcon }).addTo(mapLayersGroup);
+        marker.on('click', () => {
+          selectSection(secNum);
+          showToast(`Selected Section ${secNum}`);
+        });
+      });
+
+      if (routeEditMode) {
+        const endpoints = [
+          { key: 't1Start', label: 'T1 Start (Sec 1)', color: '#059669' },
+          { key: 't1End', label: 'T1 End (Sec 5)', color: '#059669' },
+          { key: 't2Start', label: 'T2 Start (Sec 6)', color: '#2563eb' },
+          { key: 't2End', label: 'T2 End (Sec 10)', color: '#2563eb' }
+        ];
+        endpoints.forEach(ep => {
+          const pinIcon = L.divIcon({
+            className: '',
+            html: `<div style="background:${ep.color};color:#fff;font-size:10px;font-weight:800;padding:3px 7px;border-radius:8px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);white-space:nowrap;transform:translate(-50%,-50%);">${ep.label}</div>`,
+            iconSize: [0, 0]
+          });
+          const dragMarker = L.marker(state.route[ep.key], {
+            icon: pinIcon,
+            draggable: true
+          }).addTo(mapLayersGroup);
+
+          dragMarker.on('dragend', (e) => {
+            const pos = e.target.getLatLng();
+            state.route[ep.key] = [Number(pos.lat.toFixed(6)), Number(pos.lng.toFixed(6))];
+            state.route.customSectionPolylines = null;
+            saveState();
+            syncRouteEditorInputs();
+            renderMapFeatures();
+          });
+        });
+      }
+
+      const t1Len = Math.round(haversineMeters(state.route.t1Start, state.route.t1End));
+      const t2Len = Math.round(haversineMeters(state.route.t2Start, state.route.t2End));
+      document.getElementById('route-lengths-readout').textContent = `T1: ${t1Len}m · T2: ${t2Len}m`;
+    }
+
+    function updateUserPositionOnMap(lat, lng, accuracyMeters = 12, panMap = false) {
+      lastUserLatLng = [lat, lng];
+
+      const gmapsLink = document.getElementById('google-maps-external-link');
+      gmapsLink.href = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lng.toFixed(6)}`;
+
+      if (bbsMap && gpsLayerGroup) {
+        gpsLayerGroup.clearLayers();
+        L.circle([lat, lng], {
+          radius: accuracyMeters,
+          color: '#2563eb',
+          weight: 1,
+          fillColor: '#3b82f6',
+          fillOpacity: 0.16
+        }).addTo(gpsLayerGroup);
+
+        const userIcon = L.divIcon({
+          className: '',
+          html: `<div class="gps-pulse-dot"></div>`,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9]
+        });
+        L.marker([lat, lng], { icon: userIcon }).addTo(gpsLayerGroup);
+
+        if (panMap) {
+          bbsMap.panTo([lat, lng], { animate: true });
+        }
+      }
+
+      const sections = getAllTenSections();
+      let bestSec = 1;
+      let bestDist = Infinity;
+      sections.forEach((poly, idx) => {
+        const d = pointToPolylineDistanceMeters([lat, lng], poly);
+        if (d < bestDist) {
+          bestDist = d;
+          bestSec = idx + 1;
+        }
+      });
+
+      const roundedDist = Math.round(bestDist);
+      const bandHint = roundedDist <= 25 ? 'Band 1 (0–25m)' : roundedDist <= 100 ? 'Band 2 (25–100m)' : 'Band 3 (>100m)';
+      document.getElementById('gps-nearest-readout').innerHTML =
+        `Nearest: <strong>Section ${bestSec}</strong> (${roundedDist}m from line · ${bandHint})`;
+
+      const alertBox = document.getElementById('section-switch-alert');
+      if (bestSec !== state.activeSection && roundedDist <= 150) {
+        detectedNearestSec = bestSec;
+        if (state.autoAdvanceSection) {
+          selectSection(bestSec);
+          alertBox.classList.add('hidden');
+          showToast(`Auto-switched to Section ${bestSec}`);
+        } else {
+          document.getElementById('detected-sec-name').textContent = `Section ${bestSec}`;
+          document.getElementById('detected-sec-dist').textContent = `${roundedDist}m`;
+          document.getElementById('detected-sec-num').textContent = bestSec;
+          alertBox.classList.remove('hidden');
+        }
+      } else {
+        alertBox.classList.add('hidden');
+      }
+    }
+
+    function acceptDetectedSection() {
+      if (detectedNearestSec) {
+        selectSection(detectedNearestSec);
+        document.getElementById('section-switch-alert').classList.add('hidden');
+        showToast(`Switched to Section ${detectedNearestSec}`);
+      }
+    }
+
+    function toggleAutoAdvanceSec(checked) {
+      state.autoAdvanceSection = checked;
+      saveState();
+    }
+
+    function toggleGpsTracking() {
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+        document.getElementById('btn-gps-label').textContent = 'Locate Me';
+        document.getElementById('btn-toggle-gps').className = 'tap-btn bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded-xl shadow-xs flex items-center gap-1.5';
+        document.getElementById('gps-status-pill').textContent = 'GPS Off';
+        document.getElementById('gps-status-pill').className = 'text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300';
+        showToast('GPS tracking stopped');
+        return;
+      }
+
+      if (!('geolocation' in navigator)) {
+        showToast('Geolocation not supported on this browser');
+        return;
+      }
+
+      if (simWalkTimer) toggleSimulateWalk();
+
+      document.getElementById('gps-status-pill').textContent = 'Acquiring...';
+      document.getElementById('gps-status-pill').className = 'text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300';
+
+      let firstFix = true;
+      gpsWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          document.getElementById('btn-gps-label').textContent = 'GPS Live';
+          document.getElementById('btn-toggle-gps').className = 'tap-btn bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs px-3 py-2 rounded-xl shadow-xs flex items-center gap-1.5';
+          document.getElementById('gps-status-pill').textContent = `±${Math.round(pos.coords.accuracy)}m`;
+          document.getElementById('gps-status-pill').className = 'text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300';
+
+          updateUserPositionOnMap(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, firstFix);
+          firstFix = false;
+        },
+        (err) => {
+          document.getElementById('gps-status-pill').textContent = 'GPS Blocked';
+          document.getElementById('gps-status-pill').className = 'text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300';
+          showToast('Location permission denied or unavailable');
+          gpsWatchId = null;
+        },
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      );
+    }
+
+    function toggleSimulateWalk() {
+      if (simWalkTimer) {
+        clearInterval(simWalkTimer);
+        simWalkTimer = null;
+        document.getElementById('btn-sim-label').textContent = 'Simulate Walk';
+        document.getElementById('btn-sim-walk').className = 'tap-btn bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-3 py-2 rounded-xl shadow-xs';
+        document.getElementById('gps-status-pill').textContent = 'Sim Stopped';
+        return;
+      }
+
+      if (gpsWatchId !== null) toggleGpsTracking();
+
+      simProgress = 0;
+      document.getElementById('btn-sim-label').textContent = 'Stop Sim';
+      document.getElementById('btn-sim-walk').className = 'tap-btn bg-amber-500 text-slate-950 font-extrabold text-xs px-3 py-2 rounded-xl shadow-xs';
+      document.getElementById('gps-status-pill').textContent = 'Simulating Walk';
+      document.getElementById('gps-status-pill').className = 'text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300';
+      showToast('Simulating walk along Transects 1 & 2');
+
+      const stepWalk = () => {
+        let lat, lng;
+        if (simProgress <= 0.5) {
+          const u = simProgress / 0.5;
+          lat = state.route.t1Start[0] + (state.route.t1End[0] - state.route.t1Start[0]) * u;
+          lng = state.route.t1Start[1] + (state.route.t1End[1] - state.route.t1Start[1]) * u;
+        } else {
+          const u = (simProgress - 0.5) / 0.5;
+          lat = state.route.t2Start[0] + (state.route.t2End[0] - state.route.t2Start[0]) * u;
+          lng = state.route.t2Start[1] + (state.route.t2End[1] - state.route.t2Start[1]) * u;
+        }
+        updateUserPositionOnMap(lat, lng, 8, true);
+        simProgress += 0.025;
+        if (simProgress > 1.0) simProgress = 0;
+      };
+
+      stepWalk();
+      simWalkTimer = setInterval(stepWalk, 1500);
+    }
+
+    function toggleRouteEditMode() {
+      routeEditMode = !routeEditMode;
+      const panel = document.getElementById('route-editor-panel');
+      const btn = document.getElementById('btn-edit-route');
+      panel.classList.toggle('hidden', !routeEditMode);
+      if (routeEditMode) {
+        btn.className = 'tap-btn px-2.5 py-1.5 rounded-lg border border-amber-500 bg-amber-400 font-extrabold text-slate-950';
+        syncRouteEditorInputs();
+        showToast('Drag Start/End pins on map to adjust transects');
+      } else {
+        btn.className = 'tap-btn px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 font-bold text-slate-800';
+      }
+      renderMapFeatures();
+    }
+
+    function syncRouteEditorInputs() {
+      document.getElementById('t1-start-coord').value = `${state.route.t1Start[0]}, ${state.route.t1Start[1]}`;
+      document.getElementById('t1-end-coord').value = `${state.route.t1End[0]}, ${state.route.t1End[1]}`;
+      document.getElementById('t2-start-coord').value = `${state.route.t2Start[0]}, ${state.route.t2Start[1]}`;
+      document.getElementById('t2-end-coord').value = `${state.route.t2End[0]}, ${state.route.t2End[1]}`;
+    }
+
+    function parseLatLngString(str) {
+      const parts = str.split(',').map(s => parseFloat(s.trim()));
+      if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+      return [parts[0], parts[1]];
+    }
+
+    function applyManualCoordinates() {
+      const p1s = parseLatLngString(document.getElementById('t1-start-coord').value);
+      const p1e = parseLatLngString(document.getElementById('t1-end-coord').value);
+      const p2s = parseLatLngString(document.getElementById('t2-start-coord').value);
+      const p2e = parseLatLngString(document.getElementById('t2-end-coord').value);
+
+      if (!p1s || !p1e || !p2s || !p2e) {
+        showToast('Invalid coordinates — use "lat, lng" format');
+        return;
+      }
+
+      state.route.t1Start = p1s;
+      state.route.t1End = p1e;
+      state.route.t2Start = p2s;
+      state.route.t2End = p2e;
+      state.route.customSectionPolylines = null;
+      saveState();
+      renderMapFeatures();
+      if (bbsMap) bbsMap.fitBounds([p1s, p1e, p2s, p2e], { padding: [30, 30] });
+      showToast('Updated transect coordinates');
+    }
+
+    function resetDefaultTransects() {
+      state.route = createDefaultRoute();
+      saveState();
+      syncRouteEditorInputs();
+      renderMapFeatures();
+      if (bbsMap) {
+        bbsMap.setView([
+          (DEFAULT_SQUARE_BOUNDS.south + DEFAULT_SQUARE_BOUNDS.north) / 2,
+          (DEFAULT_SQUARE_BOUNDS.west + DEFAULT_SQUARE_BOUNDS.east) / 2
+        ], 15);
+      }
+      showToast('Reset to default ST4364 transects');
+    }
+
+    function handleGpxUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parser = new DOMParser();
+          const xml = parser.parseFromString(e.target.result, 'text/xml');
+          const ptsNodes = Array.from(xml.querySelectorAll('trkpt, rtept, wpt'));
+          const coords = ptsNodes
+            .map(n => [parseFloat(n.getAttribute('lat')), parseFloat(n.getAttribute('lon'))])
+            .filter(c => !isNaN(c[0]) && !isNaN(c[1]));
+
+          if (coords.length < 2) {
+            showToast('GPX file has fewer than 2 valid points');
+            return;
+          }
+
+          const cumDist = [0];
+          for (let i = 1; i < coords.length; i++) {
+            cumDist.push(cumDist[i - 1] + haversineMeters(coords[i - 1], coords[i]));
+          }
+          const totalDist = cumDist[cumDist.length - 1];
+          const secLen = totalDist / 10;
+
+          const interpolateAtDist = (targetD) => {
+            if (targetD <= 0) return coords[0];
+            if (targetD >= totalDist) return coords[coords.length - 1];
+            for (let i = 1; i < cumDist.length; i++) {
+              if (cumDist[i] >= targetD) {
+                const segSpan = cumDist[i] - cumDist[i - 1];
+                const ratio = segSpan === 0 ? 0 : (targetD - cumDist[i - 1]) / segSpan;
+                return [
+                  coords[i - 1][0] + (coords[i][0] - coords[i - 1][0]) * ratio,
+                  coords[i - 1][1] + (coords[i][1] - coords[i - 1][1]) * ratio
+                ];
+              }
+            }
+            return coords[coords.length - 1];
+          };
+
+          const tenSections = [];
+          for (let s = 0; s < 10; s++) {
+            const dStart = s * secLen;
+            const dEnd = (s + 1) * secLen;
+            const subPoly = [interpolateAtDist(dStart)];
+            for (let i = 0; i < coords.length; i++) {
+              if (cumDist[i] > dStart && cumDist[i] < dEnd) {
+                subPoly.push(coords[i]);
+              }
+            }
+            subPoly.push(interpolateAtDist(dEnd));
+            tenSections.push(subPoly);
+          }
+
+          state.route.customSectionPolylines = tenSections;
+          state.route.t1Start = tenSections[0][0];
+          state.route.t1End = tenSections[4][tenSections[4].length - 1];
+          state.route.t2Start = tenSections[5][0];
+          state.route.t2End = tenSections[9][tenSections[9].length - 1];
+          saveState();
+          syncRouteEditorInputs();
+          renderMapFeatures();
+          if (bbsMap) bbsMap.fitBounds(coords, { padding: [25, 25] });
+          showToast(`Imported GPX (${Math.round(totalDist)}m split into 10 sections)`);
+        } catch (err) {
+          console.error('GPX parse error:', err);
+          showToast('Could not parse GPX file');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // =========================================================================
+    // 10. TAB SWITCHING & INITIAL RENDER
+    // =========================================================================
+    function switchTab(tab) {
+      state.activeTab = tab;
+      saveState();
+
+      document.getElementById('view-birds').classList.toggle('hidden', tab !== 'birds');
+      document.getElementById('view-map').classList.toggle('hidden', tab !== 'map');
+      document.getElementById('view-mammals').classList.toggle('hidden', tab !== 'mammals');
+      document.getElementById('view-summary').classList.toggle('hidden', tab !== 'summary');
+      document.getElementById('sticky-section-bar').classList.toggle('hidden', tab !== 'birds' && tab !== 'map');
+
+      ['birds', 'map', 'mammals', 'summary'].forEach(t => {
+        const navBtn = document.getElementById(`nav-${t}`);
+        if (t === tab) {
+          navBtn.className = 'flex flex-col items-center justify-center gap-0.5 font-extrabold text-[11px] sm:text-xs border-t-4 border-emerald-700 text-emerald-800 bg-emerald-50/50';
+        } else {
+          navBtn.className = 'flex flex-col items-center justify-center gap-0.5 font-bold text-[11px] sm:text-xs border-t-4 border-transparent text-slate-500 hover:text-slate-800';
+        }
+      });
+
+      if (tab === 'map') {
+        document.getElementById('auto-advance-sec-chk').checked = !!state.autoAdvanceSection;
+        initMapIfNeeded();
+        renderMapFeatures();
+      }
+      if (tab === 'mammals') renderMammalsAndColonies();
+      if (tab === 'summary') renderSummaryTab();
+    }
+
+    function renderAll() {
+      renderHeader();
+      renderSectionBar();
+      renderSpeciesList();
+      renderMammalsAndColonies();
+      renderSummaryTab();
+      switchTab(state.activeTab || 'birds');
+    }
+
+    // Initialize on load
+    renderAll();
+  </script>
+</body>
+</html>
